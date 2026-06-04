@@ -17,27 +17,11 @@ import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.Toast
-import androidx.camera.core.Camera
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.FocusMeteringAction
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.Preview
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,11 +32,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -61,8 +43,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Settings
@@ -82,7 +64,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -91,27 +72,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
-import com.lemon.echo.scanner.BarcodeAnalyzer
 import com.lemon.echo.scanner.ScanHistoryItem
 import com.lemon.echo.scanner.ScanHistoryManager
 import com.lemon.echo.scanner.ScanResult
-import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.Executors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -126,7 +100,6 @@ fun ScannerScreen(
     onAutoCopyToggle: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
 
     // Scan state
     var isScanning by remember { mutableStateOf(true) }
@@ -136,20 +109,10 @@ fun ScannerScreen(
     var showHistory by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
 
-    // Camera state
-    var camera by remember { mutableStateOf<Camera?>(null) }
-    var previewView by remember { mutableStateOf<PreviewView?>(null) }
-
-    // Keep settings params up-to-date for DisposableEffect lambda capture
+    // Keep settings params up-to-date for DisposableEffect / lambda capture
     val currentSoundEnabled by rememberUpdatedState(soundEnabled)
     val currentVibrationEnabled by rememberUpdatedState(vibrationEnabled)
     val currentAutoCopyEnabled by rememberUpdatedState(autoCopyEnabled)
-    val currentOnAutoCopyToggle by rememberUpdatedState(onAutoCopyToggle)
-
-    // Focus indicator state (pixel coords from touch event)
-    var focusEvent by remember { mutableStateOf(0L) }   // incremented on each tap for focus
-    var focusX by remember { mutableStateOf(0f) }
-    var focusY by remember { mutableStateOf(0f) }
 
     // Keep screen on while scanning
     val activity = context as? Activity
@@ -174,13 +137,15 @@ fun ScannerScreen(
             if (bitmap != null) {
                 scanBitmapForResult(context, bitmap) { result ->
                     galleryProcessing = false
-                    isScanning = false
-                    detectedResult = result
-                    showResult = true
-                    historyManager.addToHistory(result)
-                    triggerFeedback(context, currentSoundEnabled, currentVibrationEnabled)
-                    if (currentAutoCopyEnabled) {
-                        copyToClipboard(context, result.rawText, showToast = false)
+                    if (result != null) {
+                        isScanning = false
+                        detectedResult = result
+                        showResult = true
+                        historyManager.addToHistory(result)
+                        triggerFeedback(context, currentSoundEnabled, currentVibrationEnabled)
+                        if (currentAutoCopyEnabled) {
+                            copyToClipboard(context, result.rawText, showToast = false)
+                        }
                     }
                 }
             } else {
@@ -193,30 +158,24 @@ fun ScannerScreen(
         }
     }
 
-    // Camera provider
-    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
-    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    fun scanAgain() {
+        showResult = false
+        detectedResult = null
+        isScanning = true
+    }
 
-    // Set up camera when scanning
-    DisposableEffect(lifecycleOwner, isScanning) {
-        if (!isScanning) return@DisposableEffect onDispose {}
+    // --- UI ---
 
-        val cameraProvider = cameraProviderFuture.get()
-
-        val preview = Preview.Builder()
-            .build()
-            .also {
-                previewView?.let { view ->
-                    it.setSurfaceProvider(view.surfaceProvider)
-                }
-            }
-
-        val cameraSelector = CameraSelector.Builder()
-            .requireLensFacing(CameraSelector.LENS_FACING_BACK)
-            .build()
-
-        val analyzer = BarcodeAnalyzer { result ->
-            if (isScanning) {
+    // Use Modifier.fillMaxSize() (NOT modifier.fillMaxSize()) so the camera draws
+    // behind system bars for an immersive edge-to-edge look. The modifier parameter
+    // (which includes Scaffold innerPadding) is intentionally skipped.
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Camera preview (CameraX + scan overlay + focus indicator)
+        CameraPreview(
+            modifier = Modifier.fillMaxSize(),
+            isScanning = isScanning && !showResult,
+            isTorchOn = isTorchOn,
+            onBarcodeDetected = { result ->
                 isScanning = false
                 detectedResult = result
                 showResult = true
@@ -226,142 +185,15 @@ fun ScannerScreen(
                     copyToClipboard(context, result.rawText, showToast = false)
                 }
             }
-        }
-
-        val imageAnalysis = ImageAnalysis.Builder()
-            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .build()
-            .also { it.setAnalyzer(analysisExecutor, analyzer) }
-
-        try {
-            cameraProvider.unbindAll()
-            camera = cameraProvider.bindToLifecycle(
-                lifecycleOwner,
-                cameraSelector,
-                preview,
-                imageAnalysis
-            )
-            camera?.cameraControl?.enableTorch(isTorchOn)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        onDispose {
-            cameraProvider.unbindAll()
-        }
-    }
-
-    // --- helper functions ---
-
-    fun toggleTorch() {
-        isTorchOn = !isTorchOn
-        camera?.cameraControl?.enableTorch(isTorchOn)
-    }
-
-    fun scanAgain() {
-        showResult = false
-        detectedResult = null
-        isScanning = true
-    }
-
-    // --- UI ---
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Camera preview with tap-to-focus
-        AndroidView(
-            factory = { ctx ->
-                PreviewView(ctx).also { view ->
-                    view.scaleType = PreviewView.ScaleType.FILL_CENTER
-                    view.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                    previewView = view
-
-                    // Tap to focus
-                    view.setOnTouchListener { _, event ->
-                        if (event.action == MotionEvent.ACTION_DOWN) {
-                            camera?.let { cam ->
-                                val factory = view.meteringPointFactory
-                                val point = factory.createPoint(event.x, event.y)
-                                val action = FocusMeteringAction.Builder(point).build()
-                                cam.cameraControl.startFocusAndMetering(action)
-                            }
-                            focusX = event.x
-                            focusY = event.y
-                            focusEvent = System.currentTimeMillis()
-                            true
-                        } else false
-                    }
-                    // Pinch-to-zoom enabled by default on CameraX 1.4+
-                }
-            },
-            modifier = Modifier.fillMaxSize()
         )
 
-        // Scan overlay (dark edges + scan frame + animated scan line)
-        ScanOverlay(isScanning = isScanning && !showResult)
-
-        // Tap-to-focus visual indicator
-        FocusIndicator(
-            trigger = focusEvent,
-            x = focusX,
-            y = focusY
+        // Toolbar: torch (top-right), settings (top-right), history (top-left)
+        ScannerToolbar(
+            isTorchOn = isTorchOn,
+            onToggleTorch = { isTorchOn = !isTorchOn },
+            onOpenSettings = { showSettings = true },
+            onOpenHistory = { showHistory = true }
         )
-
-        // Top-right buttons: torch + settings
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .statusBarsPadding()
-                .padding(top = 12.dp, end = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            IconButton(
-                onClick = { toggleTorch() },
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.4f)),
-                colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = if (isTorchOn) Color(0xFFFFD700) else Color.White
-                )
-            ) {
-                Icon(
-                    imageVector = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
-                    contentDescription = if (isTorchOn) "关闭手电筒" else "打开手电筒"
-                )
-            }
-
-            IconButton(
-                onClick = { showSettings = true },
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.4f)),
-                colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "设置"
-                )
-            }
-        }
-
-        // History button (top-left)
-        IconButton(
-            onClick = { showHistory = true },
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .statusBarsPadding()
-                .padding(top = 12.dp, start = 16.dp)
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.4f)),
-            colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)
-        ) {
-            Icon(
-                imageVector = Icons.Default.History,
-                contentDescription = "扫描历史"
-            )
-        }
 
         // Bottom controls: gallery button + hint
         Column(
@@ -370,7 +202,6 @@ fun ScannerScreen(
                 .padding(bottom = 48.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Gallery button
             Box(
                 modifier = Modifier
                     .size(44.dp)
@@ -455,7 +286,74 @@ fun ScannerScreen(
     )
 }
 
-// ====== Feedback ======
+// ====== Toolbar ======
+
+@Composable
+private fun ScannerToolbar(
+    isTorchOn: Boolean,
+    onToggleTorch: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenHistory: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // History button (top-left)
+        IconButton(
+            onClick = onOpenHistory,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(top = 12.dp, start = 16.dp)
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.4f)),
+            colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)
+        ) {
+            Icon(
+                imageVector = Icons.Default.History,
+                contentDescription = "扫描历史"
+            )
+        }
+
+        // Torch + settings (top-right)
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(top = 12.dp, end = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            IconButton(
+                onClick = onToggleTorch,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.4f)),
+                colors = IconButtonDefaults.iconButtonColors(
+                    contentColor = if (isTorchOn) Color(0xFFFFD700) else Color.White
+                )
+            ) {
+                Icon(
+                    imageVector = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                    contentDescription = if (isTorchOn) "关闭手电筒" else "打开手电筒"
+                )
+            }
+
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.4f)),
+                colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "设置"
+                )
+            }
+        }
+    }
+}
 
 private fun triggerFeedback(context: Context, playSound: Boolean, playVibration: Boolean) {
     // Ensure on main thread for vibration
@@ -542,96 +440,6 @@ private fun openUrl(context: Context, url: String) {
         context.startActivity(intent)
     } catch (e: ActivityNotFoundException) {
         Toast.makeText(context, "没有可用的浏览器", Toast.LENGTH_SHORT).show()
-    }
-}
-
-// ====== Scan Overlay ======
-
-@Composable
-private fun ScanOverlay(isScanning: Boolean) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Semi-transparent dark background
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.5f))
-        )
-
-        // Clear scanning frame in the center
-        val frameSize = 260.dp
-        Box(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .size(frameSize)
-        ) {
-            // Frame border
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Transparent)
-                    .border(
-                        width = 2.dp,
-                        color = if (isScanning) Color.White else Color.White.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-            )
-
-            // Animated scan line — radar-sweep style up and down
-            if (isScanning) {
-                val infiniteTransition = rememberInfiniteTransition(label = "scanLine")
-                val scanLineOffset by infiniteTransition.animateFloat(
-                    initialValue = 0f,
-                    targetValue = 1f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(2000, easing = LinearEasing),
-                        repeatMode = RepeatMode.Reverse
-                    ),
-                    label = "scanLineOffset"
-                )
-
-                // lineY ranges from 2.dp to frameSize-2.dp
-                val lineY = 2.dp + (frameSize - 4.dp) * scanLineOffset
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .offset(y = lineY)
-                        .padding(horizontal = 6.dp)
-                        .background(Color(0xFF4FC3F7), RoundedCornerShape(1.dp))
-                )
-            }
-        }
-    }
-}
-
-// ====== Tap-to-Focus Visual Indicator ======
-
-@Composable
-private fun FocusIndicator(trigger: Long, x: Float, y: Float) {
-    // visibility fades from 1f → 0f over 500ms
-    var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(trigger) {
-        if (trigger != 0L) {
-            shown = true
-            delay(500)
-            shown = false
-        }
-    }
-
-    val alpha by animateFloatAsState(
-        targetValue = if (shown) 1f else 0f,
-        animationSpec = tween(400),
-        label = "focusAlpha"
-    )
-
-    if (alpha > 0f) {
-        Box(
-            modifier = Modifier
-                .offset { IntOffset(x.toInt() - 30.dp.roundToPx(), y.toInt() - 30.dp.roundToPx()) }
-                .size(60.dp)
-                .border(2.dp, Color(0xFF4FC3F7).copy(alpha = alpha), RoundedCornerShape(6.dp))
-                .background(Color(0xFF4FC3F7).copy(alpha = 0.1f * alpha))
-        )
     }
 }
 
@@ -884,11 +692,12 @@ private fun HistoryItem(item: ScanHistoryItem, onClick: () -> Unit) {
     }
 }
 
-/** Scan a Bitmap using ML Kit barcode scanner and invoke scanResultCallback with the result. */
+/** Scan a Bitmap using ML Kit barcode scanner and invoke [onResult] when done.
+ * [onResult] is ALWAYS called, with null if no barcode was found or an error occurred. */
 private fun scanBitmapForResult(
     context: Context,
     bitmap: android.graphics.Bitmap,
-    scanResultCallback: (ScanResult) -> Unit
+    onResult: (ScanResult?) -> Unit
 ) {
     val image = InputImage.fromBitmap(bitmap, 0)
     val scanner = BarcodeScanning.getClient()
@@ -897,17 +706,18 @@ private fun scanBitmapForResult(
             for (barcode in barcodes) {
                 val rawValue = barcode.rawValue
                 if (!rawValue.isNullOrBlank()) {
-                    val result = ScanResult.fromBarcodeText(rawValue)
-                    scanResultCallback(result)
+                    onResult(ScanResult.fromBarcodeText(rawValue))
                     return@addOnSuccessListener
                 }
             }
             // No scannable barcode found
+            onResult(null)
             Handler(Looper.getMainLooper()).post {
                 Toast.makeText(context, "未识别到二维码", Toast.LENGTH_SHORT).show()
             }
         }
         .addOnFailureListener {
+            onResult(null)
             Handler(Looper.getMainLooper()).post {
                 Toast.makeText(context, "识别失败", Toast.LENGTH_SHORT).show()
             }

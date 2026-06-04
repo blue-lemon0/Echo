@@ -1,6 +1,7 @@
 package com.lemon.echo.scanner
 
 import android.graphics.Bitmap
+import android.util.Log
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 
@@ -19,6 +20,7 @@ object QrGenerator {
             }
             bitmap
         } catch (e: Exception) {
+            Log.e("QrGenerator", "generate failed", e)
             null
         }
     }

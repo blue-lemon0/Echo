@@ -26,6 +26,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -97,7 +98,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 private fun PermissionDeniedDialog(
     onGoToSettings: () -> Unit,
     onRetry: () -> Unit
@@ -121,7 +122,7 @@ private fun PermissionDeniedDialog(
     )
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 private fun PermissionRequestView(onRequestPermission: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize(),
