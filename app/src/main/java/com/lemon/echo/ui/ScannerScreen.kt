@@ -1,11 +1,13 @@
 package com.lemon.echo.ui
 
+import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.media.AudioManager
 import android.media.ToneGenerator
@@ -17,6 +19,7 @@ import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.Settings
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -49,6 +52,7 @@ import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -69,6 +73,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -78,6 +83,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
 import com.lemon.echo.scanner.ScanHistoryItem
@@ -100,6 +106,7 @@ fun ScannerScreen(
     onAutoCopyToggle: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val activity = context as? Activity
 
     // Scan state
     var isScanning by remember { mutableStateOf(true) }
@@ -109,13 +116,31 @@ fun ScannerScreen(
     var showHistory by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
 
+    // Permission state
+    var hasPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    var showPermissionDeniedDialog by remember { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasPermission = granted
+        if (!granted && activity != null &&
+            !activity.shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)
+        ) {
+            showPermissionDeniedDialog = true
+        }
+    }
+
     // Keep settings params up-to-date for DisposableEffect / lambda capture
     val currentSoundEnabled by rememberUpdatedState(soundEnabled)
     val currentVibrationEnabled by rememberUpdatedState(vibrationEnabled)
     val currentAutoCopyEnabled by rememberUpdatedState(autoCopyEnabled)
 
     // Keep screen on while scanning
-    val activity = context as? Activity
     DisposableEffect(Unit) {
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose {
@@ -165,69 +190,75 @@ fun ScannerScreen(
     }
 
     // --- UI ---
-
-    // Use Modifier.fillMaxSize() (NOT modifier.fillMaxSize()) so the camera draws
-    // behind system bars for an immersive edge-to-edge look. The modifier parameter
-    // (which includes Scaffold innerPadding) is intentionally skipped.
     Box(modifier = Modifier.fillMaxSize()) {
-        // Camera preview (CameraX + scan overlay + focus indicator)
-        CameraPreview(
-            modifier = Modifier.fillMaxSize(),
-            isScanning = isScanning && !showResult,
-            isTorchOn = isTorchOn,
-            onBarcodeDetected = { result ->
-                isScanning = false
-                detectedResult = result
-                showResult = true
-                historyManager.addToHistory(result)
-                triggerFeedback(context, currentSoundEnabled, currentVibrationEnabled)
-                if (currentAutoCopyEnabled) {
-                    copyToClipboard(context, result.rawText, showToast = false)
+        if (hasPermission) {
+            // Camera preview (CameraX + scan overlay + focus indicator)
+            CameraPreview(
+                modifier = Modifier.fillMaxSize(),
+                isScanning = isScanning && !showResult,
+                isTorchOn = isTorchOn,
+                onBarcodeDetected = { result ->
+                    isScanning = false
+                    detectedResult = result
+                    showResult = true
+                    historyManager.addToHistory(result)
+                    triggerFeedback(context, currentSoundEnabled, currentVibrationEnabled)
+                    if (currentAutoCopyEnabled) {
+                        copyToClipboard(context, result.rawText, showToast = false)
+                    }
                 }
-            }
-        )
+            )
+        } else {
+            // Permission request view
+            PermissionRequestContent(
+                onRequestPermission = { permissionLauncher.launch(Manifest.permission.CAMERA) }
+            )
+        }
 
-        // Toolbar: torch (top-right), settings (top-right), history (top-left)
+        // Toolbar: torch (only when hasPermission), settings, history
         ScannerToolbar(
             isTorchOn = isTorchOn,
             onToggleTorch = { isTorchOn = !isTorchOn },
             onOpenSettings = { showSettings = true },
-            onOpenHistory = { showHistory = true }
+            onOpenHistory = { showHistory = true },
+            showTorch = hasPermission
         )
 
-        // Bottom controls: gallery button + hint
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 48.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Box(
+        // Bottom controls: gallery button + hint (only when camera is active)
+        if (hasPermission) {
+            Column(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.35f))
-                    .clickable(enabled = !galleryProcessing) {
-                        imagePicker.launch("image/*")
-                    },
-                contentAlignment = Alignment.Center
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 48.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    imageVector = if (galleryProcessing) Icons.Default.QrCodeScanner
-                    else Icons.Default.Image,
-                    contentDescription = "从相册选择二维码",
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .clickable(enabled = !galleryProcessing) {
+                            imagePicker.launch("image/*")
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (galleryProcessing) Icons.Default.QrCodeScanner
+                        else Icons.Default.Image,
+                        contentDescription = "从相册选择二维码",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.size(10.dp))
+
+                Text(
+                    text = if (galleryProcessing) "识别中…" else "将二维码对准框内",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 14.sp,
                 )
             }
-
-            Spacer(modifier = Modifier.size(10.dp))
-
-            Text(
-                text = if (galleryProcessing) "识别中…" else "将二维码对准框内",
-                color = Color.White.copy(alpha = 0.8f),
-                fontSize = 14.sp,
-            )
         }
     }
 
@@ -284,8 +315,36 @@ fun ScannerScreen(
         onAutoCopyToggle = onAutoCopyToggle,
         onDismiss = { showSettings = false }
     )
-}
 
+    // Permission denied dialog
+    if (showPermissionDeniedDialog) {
+        AlertDialog(
+            onDismissRequest = { showPermissionDeniedDialog = false },
+            title = { Text("需要相机权限") },
+            text = {
+                Text("扫码功能需要相机权限。您之前拒绝了权限请求，请在系统设置中手动开启相机权限。")
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showPermissionDeniedDialog = false
+                    context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", context.packageName, null)
+                    })
+                }) {
+                    Text("前往设置")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showPermissionDeniedDialog = false
+                    permissionLauncher.launch(Manifest.permission.CAMERA)
+                }) {
+                    Text("再试一次")
+                }
+            }
+        )
+    }
+}
 // ====== Toolbar ======
 
 @Composable
@@ -293,7 +352,8 @@ private fun ScannerToolbar(
     isTorchOn: Boolean,
     onToggleTorch: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenHistory: () -> Unit
+    onOpenHistory: () -> Unit,
+    showTorch: Boolean = true
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         // History button (top-left)
@@ -322,20 +382,22 @@ private fun ScannerToolbar(
                 .padding(top = 12.dp, end = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            IconButton(
-                onClick = onToggleTorch,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.4f)),
-                colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = if (isTorchOn) Color(0xFFFFD700) else Color.White
-                )
-            ) {
-                Icon(
-                    imageVector = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
-                    contentDescription = if (isTorchOn) "关闭手电筒" else "打开手电筒"
-                )
+            if (showTorch) {
+                IconButton(
+                    onClick = onToggleTorch,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.4f)),
+                    colors = IconButtonDefaults.iconButtonColors(
+                        contentColor = if (isTorchOn) Color(0xFFFFD700) else Color.White
+                    )
+                ) {
+                    Icon(
+                        imageVector = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                        contentDescription = if (isTorchOn) "关闭手电筒" else "打开手电筒"
+                    )
+                }
             }
 
             IconButton(
@@ -351,6 +413,46 @@ private fun ScannerToolbar(
                     contentDescription = "设置"
                 )
             }
+        }
+    }
+}
+
+// ====== Permission Request View ======
+
+@Composable
+private fun PermissionRequestContent(onRequestPermission: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            imageVector = Icons.Default.QrCodeScanner,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.6f),
+            modifier = Modifier.size(64.dp)
+        )
+        Spacer(modifier = Modifier.size(24.dp))
+        Text(
+            text = "需要相机权限才能扫码",
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+            modifier = Modifier.padding(horizontal = 32.dp)
+        )
+        Spacer(modifier = Modifier.size(8.dp))
+        Text(
+            text = "点击下方按钮授权相机权限",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White.copy(alpha = 0.6f)
+        )
+        Spacer(modifier = Modifier.size(32.dp))
+        Button(
+            onClick = onRequestPermission,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text("授予相机权限")
         }
     }
 }
