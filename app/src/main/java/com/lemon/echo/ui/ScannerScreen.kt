@@ -1,10 +1,12 @@
 package com.lemon.echo.ui
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.net.Uri
@@ -16,12 +18,15 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.view.MotionEvent
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.LinearEasing
@@ -56,6 +61,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -95,6 +101,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.common.InputImage
 import com.lemon.echo.scanner.BarcodeAnalyzer
 import com.lemon.echo.scanner.ScanHistoryItem
 import com.lemon.echo.scanner.ScanHistoryManager
@@ -142,6 +150,48 @@ fun ScannerScreen(
     var focusEvent by remember { mutableStateOf(0L) }   // incremented on each tap for focus
     var focusX by remember { mutableStateOf(0f) }
     var focusY by remember { mutableStateOf(0f) }
+
+    // Keep screen on while scanning
+    val activity = context as? Activity
+    DisposableEffect(Unit) {
+        activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    // Image picker for gallery QR scanning
+    var galleryProcessing by remember { mutableStateOf(false) }
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        galleryProcessing = true
+        try {
+            val inputStream = context.contentResolver.openInputStream(uri)
+            val bitmap = BitmapFactory.decodeStream(inputStream)
+            inputStream?.close()
+            if (bitmap != null) {
+                scanBitmapForResult(context, bitmap) { result ->
+                    galleryProcessing = false
+                    isScanning = false
+                    detectedResult = result
+                    showResult = true
+                    historyManager.addToHistory(result)
+                    triggerFeedback(context, currentSoundEnabled, currentVibrationEnabled)
+                    if (currentAutoCopyEnabled) {
+                        copyToClipboard(context, result.rawText, showToast = false)
+                    }
+                }
+            } else {
+                galleryProcessing = false
+                Toast.makeText(context, "无法读取图片", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            galleryProcessing = false
+            Toast.makeText(context, "读取图片失败", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Camera provider
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
@@ -313,15 +363,41 @@ fun ScannerScreen(
             )
         }
 
-        // Scanning hint (bottom)
-        Text(
-            text = "将二维码对准框内",
-            color = Color.White.copy(alpha = 0.8f),
-            fontSize = 14.sp,
+        // Bottom controls: gallery button + hint
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 48.dp)
-        )
+                .padding(bottom = 48.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Gallery button
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.35f))
+                    .clickable(enabled = !galleryProcessing) {
+                        imagePicker.launch("image/*")
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (galleryProcessing) Icons.Default.QrCodeScanner
+                    else Icons.Default.Image,
+                    contentDescription = "从相册选择二维码",
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.size(10.dp))
+
+            Text(
+                text = if (galleryProcessing) "识别中…" else "将二维码对准框内",
+                color = Color.White.copy(alpha = 0.8f),
+                fontSize = 14.sp,
+            )
+        }
     }
 
     // Result bottom sheet
@@ -806,4 +882,34 @@ private fun HistoryItem(item: ScanHistoryItem, onClick: () -> Unit) {
                 }
         )
     }
+}
+
+/** Scan a Bitmap using ML Kit barcode scanner and invoke scanResultCallback with the result. */
+private fun scanBitmapForResult(
+    context: Context,
+    bitmap: android.graphics.Bitmap,
+    scanResultCallback: (ScanResult) -> Unit
+) {
+    val image = InputImage.fromBitmap(bitmap, 0)
+    val scanner = BarcodeScanning.getClient()
+    scanner.process(image)
+        .addOnSuccessListener { barcodes ->
+            for (barcode in barcodes) {
+                val rawValue = barcode.rawValue
+                if (!rawValue.isNullOrBlank()) {
+                    val result = ScanResult.fromBarcodeText(rawValue)
+                    scanResultCallback(result)
+                    return@addOnSuccessListener
+                }
+            }
+            // No scannable barcode found
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(context, "未识别到二维码", Toast.LENGTH_SHORT).show()
+            }
+        }
+        .addOnFailureListener {
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(context, "识别失败", Toast.LENGTH_SHORT).show()
+            }
+        }
 }
