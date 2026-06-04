@@ -80,6 +80,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -131,6 +132,12 @@ fun ScannerScreen(
     var camera by remember { mutableStateOf<Camera?>(null) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
 
+    // Keep settings params up-to-date for DisposableEffect lambda capture
+    val currentSoundEnabled by rememberUpdatedState(soundEnabled)
+    val currentVibrationEnabled by rememberUpdatedState(vibrationEnabled)
+    val currentAutoCopyEnabled by rememberUpdatedState(autoCopyEnabled)
+    val currentOnAutoCopyToggle by rememberUpdatedState(onAutoCopyToggle)
+
     // Focus indicator state (pixel coords from touch event)
     var focusEvent by remember { mutableStateOf(0L) }   // incremented on each tap for focus
     var focusX by remember { mutableStateOf(0f) }
@@ -164,8 +171,8 @@ fun ScannerScreen(
                 detectedResult = result
                 showResult = true
                 historyManager.addToHistory(result)
-                triggerFeedback(context, soundEnabled, vibrationEnabled)
-                if (autoCopyEnabled) {
+                triggerFeedback(context, currentSoundEnabled, currentVibrationEnabled)
+                if (currentAutoCopyEnabled) {
                     copyToClipboard(context, result.rawText, showToast = false)
                 }
             }
