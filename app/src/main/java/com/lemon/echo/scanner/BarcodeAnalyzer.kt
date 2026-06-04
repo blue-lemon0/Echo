@@ -1,5 +1,7 @@
 package com.lemon.echo.scanner
 
+import androidx.annotation.OptIn
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.barcode.BarcodeScanner
@@ -16,7 +18,7 @@ class BarcodeAnalyzer(
 
     private val scanner: BarcodeScanner = BarcodeScanning.getClient()
 
-    @androidx.camera.core.ExperimentalCameraX
+    @OptIn(ExperimentalGetImage::class)
     override fun analyze(imageProxy: ImageProxy) {
         val mediaImage = imageProxy.image
         if (mediaImage == null) {
@@ -28,13 +30,13 @@ class BarcodeAnalyzer(
 
         scanner.process(inputImage)
             .addOnSuccessListener { barcodes ->
-                for (barcode in barcodes) {
+                barcodes.firstOrNull { barcode ->
                     barcode.rawValue?.let { rawText ->
                         if (rawText.isNotBlank()) {
                             onBarcodeDetected(ScanResult.fromBarcodeText(rawText))
-                            break // only take the first valid result
-                        }
-                    }
+                            true
+                        } else false
+                    } ?: false
                 }
             }
             .addOnCompleteListener {

@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "com.lemon.echo"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.lemon.echo"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
@@ -68,6 +68,9 @@ dependencies {
     // Coroutines
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
+
+    // Material (XML 主题需要)
+    implementation(libs.material)
 
     // Testing
     testImplementation(libs.junit)
