@@ -15,8 +15,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,9 +36,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -170,6 +173,41 @@ fun CameraPreview(
     }
 }
 
+// ====== Corner Brackets (reusable) ======
+
+/** Draws four L-shaped corner brackets using a Canvas. */
+@Composable
+internal fun CornerBrackets(
+    modifier: Modifier = Modifier,
+    cornerLength: Dp,
+    strokeWidth: Dp,
+    color: Color
+) {
+    Canvas(modifier = modifier) {
+        val cLen = cornerLength.toPx()
+        val sw = strokeWidth.toPx()
+        val path = Path().apply {
+            // Top-left
+            moveTo(0f, cLen)
+            lineTo(0f, 0f)
+            lineTo(cLen, 0f)
+            // Top-right
+            moveTo(size.width - cLen, 0f)
+            lineTo(size.width, 0f)
+            lineTo(size.width, cLen)
+            // Bottom-right
+            moveTo(size.width, size.height - cLen)
+            lineTo(size.width, size.height)
+            lineTo(size.width - cLen, size.height)
+            // Bottom-left
+            moveTo(cLen, size.height)
+            lineTo(0f, size.height)
+            lineTo(0f, size.height - cLen)
+        }
+        drawPath(path, color = color, style = Stroke(width = sw, cap = StrokeCap.Round))
+    }
+}
+
 // ====== Scan Overlay ======
 
 @Composable
@@ -182,23 +220,23 @@ internal fun ScanOverlay(isScanning: Boolean) {
                 .background(Color.Black.copy(alpha = 0.5f))
         )
 
-        // Clear scanning frame in the center
+        // Clear scanning frame with corner brackets
         val frameSize = 260.dp
+        val cornerLen = 28.dp  // length of each corner arm
+        val strokeWidth = 3.dp
+        val cornerColor = if (isScanning) Color(0xFF4FC3F7) else Color.White.copy(alpha = 0.6f)
+
         Box(
             modifier = Modifier
                 .align(Alignment.Center)
                 .size(frameSize)
         ) {
-            // Frame border
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Transparent)
-                    .border(
-                        width = 2.dp,
-                        color = if (isScanning) Color.White else Color.White.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+            // Four corner brackets
+            CornerBrackets(
+                modifier = Modifier.fillMaxSize(),
+                cornerLength = cornerLen,
+                strokeWidth = strokeWidth,
+                color = cornerColor
             )
 
             // Animated scan line — radar-sweep style up and down
@@ -249,12 +287,22 @@ internal fun FocusIndicator(trigger: Long, x: Float, y: Float) {
     )
 
     if (alpha > 0f) {
+        val indicatorSize = 60.dp
+        val cornerLen = 14.dp
+        val strokeWidth = 2.dp
+        val indicatorColor = Color(0xFF4FC3F7).copy(alpha = alpha)
+
         Box(
             modifier = Modifier
-                .offset { IntOffset(x.toInt() - 30.dp.roundToPx(), y.toInt() - 30.dp.roundToPx()) }
-                .size(60.dp)
-                .border(2.dp, Color(0xFF4FC3F7).copy(alpha = alpha), RoundedCornerShape(6.dp))
-                .background(Color(0xFF4FC3F7).copy(alpha = 0.1f * alpha))
-        )
+                .offset { IntOffset(x.toInt() - (indicatorSize / 2).roundToPx(), y.toInt() - (indicatorSize / 2).roundToPx()) }
+                .size(indicatorSize)
+        ) {
+            CornerBrackets(
+                modifier = Modifier.fillMaxSize(),
+                cornerLength = cornerLen,
+                strokeWidth = strokeWidth,
+                color = indicatorColor
+            )
+        }
     }
 }
