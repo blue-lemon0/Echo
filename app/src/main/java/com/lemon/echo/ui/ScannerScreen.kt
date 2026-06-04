@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -105,10 +106,18 @@ import java.util.concurrent.Executors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScannerScreen() {
+fun ScannerScreen(
+    modifier: Modifier = Modifier,
+    historyManager: ScanHistoryManager,
+    soundEnabled: Boolean = true,
+    vibrationEnabled: Boolean = true,
+    autoCopyEnabled: Boolean = false,
+    onSoundToggle: (Boolean) -> Unit = {},
+    onVibrationToggle: (Boolean) -> Unit = {},
+    onAutoCopyToggle: (Boolean) -> Unit = {}
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val historyManager = remember { ScanHistoryManager(context) }
 
     // Scan state
     var isScanning by remember { mutableStateOf(true) }
@@ -116,13 +125,11 @@ fun ScannerScreen() {
     var showResult by remember { mutableStateOf(false) }
     var isTorchOn by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
 
     // Camera state
     var camera by remember { mutableStateOf<Camera?>(null) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
-
-    // Auto-copy: local Compose state synced with SharedPreferences
-    var autoCopyEnabled by remember { mutableStateOf(historyManager.autoCopyEnabled) }
 
     // Focus indicator state (pixel coords from touch event)
     var focusEvent by remember { mutableStateOf(0L) }   // incremented on each tap for focus
@@ -157,7 +164,7 @@ fun ScannerScreen() {
                 detectedResult = result
                 showResult = true
                 historyManager.addToHistory(result)
-                triggerFeedback(context)
+                triggerFeedback(context, soundEnabled, vibrationEnabled)
                 if (autoCopyEnabled) {
                     copyToClipboard(context, result.rawText, showToast = false)
                 }
@@ -242,24 +249,43 @@ fun ScannerScreen() {
             y = focusY
         )
 
-        // Torch button (top-right)
-        IconButton(
-            onClick = { toggleTorch() },
+        // Top-right buttons: torch + settings
+        Column(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
-                .padding(top = 12.dp, end = 16.dp)
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.4f)),
-            colors = IconButtonDefaults.iconButtonColors(
-                contentColor = if (isTorchOn) Color(0xFFFFD700) else Color.White
-            )
+                .padding(top = 12.dp, end = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(
-                imageVector = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
-                contentDescription = if (isTorchOn) "关闭手电筒" else "打开手电筒"
-            )
+            IconButton(
+                onClick = { toggleTorch() },
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.4f)),
+                colors = IconButtonDefaults.iconButtonColors(
+                    contentColor = if (isTorchOn) Color(0xFFFFD700) else Color.White
+                )
+            ) {
+                Icon(
+                    imageVector = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                    contentDescription = if (isTorchOn) "关闭手电筒" else "打开手电筒"
+                )
+            }
+
+            IconButton(
+                onClick = { showSettings = true },
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.4f)),
+                colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "设置"
+                )
+            }
         }
 
         // History button (top-left)
@@ -305,10 +331,7 @@ fun ScannerScreen() {
             ResultContent(
                 result = result,
                 autoCopyEnabled = autoCopyEnabled,
-                onToggleAutoCopy = { enabled ->
-                    autoCopyEnabled = enabled
-                    historyManager.autoCopyEnabled = enabled
-                },
+                onToggleAutoCopy = onAutoCopyToggle,
                 onCopy = { copyToClipboard(context, result.rawText) },
                 onShare = { shareText(context, result.rawText) },
                 onOpenUrl = { openUrl(context, result.rawText) },
@@ -335,66 +358,79 @@ fun ScannerScreen() {
             )
         }
     }
+
+    // Settings bottom sheet
+    SettingsSheet(
+        show = showSettings,
+        soundEnabled = soundEnabled,
+        vibrationEnabled = vibrationEnabled,
+        autoCopyEnabled = autoCopyEnabled,
+        onSoundToggle = onSoundToggle,
+        onVibrationToggle = onVibrationToggle,
+        onAutoCopyToggle = onAutoCopyToggle,
+        onDismiss = { showSettings = false }
+    )
 }
 
 // ====== Feedback ======
 
-private fun triggerFeedback(context: Context) {
+private fun triggerFeedback(context: Context, playSound: Boolean, playVibration: Boolean) {
     // Ensure on main thread for vibration
     if (Looper.myLooper() != Looper.getMainLooper()) {
-        Handler(Looper.getMainLooper()).post { triggerFeedback(context) }
+        Handler(Looper.getMainLooper()).post { triggerFeedback(context, playSound, playVibration) }
         return
     }
 
-    // === Vibration — try multiple approaches ===
-    try {
-        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-            vm?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-        }
-        vibrator?.let { v ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                // API 30+ with VibrationAttributes for better compatibility
-                val attrs = VibrationAttributes.Builder()
-                    .setUsage(VibrationAttributes.USAGE_COMMUNICATION_REQUEST)
-                    .build()
-                v.vibrate(
-                    VibrationEffect.createOneShot(120, VibrationEffect.DEFAULT_AMPLITUDE),
-                    attrs
-                )
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                v.vibrate(VibrationEffect.createOneShot(120, 128))
+    // === Vibration ===
+    if (playVibration) {
+        try {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vm?.defaultVibrator
             } else {
                 @Suppress("DEPRECATION")
-                v.vibrate(120)
+                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
             }
-        }
-    } catch (_: Exception) {
-        // Fallback: pre-O pattern vibration
-        try {
-            @Suppress("DEPRECATION")
-            (context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)?.vibrate(
-                longArrayOf(0, 120), -1
-            )
+            vibrator?.let { v ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val attrs = VibrationAttributes.Builder()
+                        .setUsage(VibrationAttributes.USAGE_COMMUNICATION_REQUEST)
+                        .build()
+                    v.vibrate(
+                        VibrationEffect.createOneShot(120, VibrationEffect.DEFAULT_AMPLITUDE),
+                        attrs
+                    )
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    v.vibrate(VibrationEffect.createOneShot(120, 128))
+                } else {
+                    @Suppress("DEPRECATION")
+                    v.vibrate(120)
+                }
+            }
         } catch (_: Exception) {
+            try {
+                @Suppress("DEPRECATION")
+                (context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)?.vibrate(
+                    longArrayOf(0, 120), -1
+                )
+            } catch (_: Exception) {
+            }
         }
     }
 
-    // === Sound — ToneGenerator works on all devices regardless of silent mode ===
-    Thread {
-        try {
-            val generator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
-            generator.startTone(ToneGenerator.TONE_PROP_ACK, 200)
-            Thread.sleep(300)
-            generator.release()
-        } catch (_: Exception) {
-        }
-    }.start()
+    // === Sound ===
+    if (playSound) {
+        Thread {
+            try {
+                val generator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
+                generator.startTone(ToneGenerator.TONE_PROP_ACK, 200)
+                Thread.sleep(300)
+                generator.release()
+            } catch (_: Exception) {
+            }
+        }.start()
+    }
 }
-
 // ====== Clipboard ======
 
 private fun copyToClipboard(context: Context, text: String, showToast: Boolean = true) {

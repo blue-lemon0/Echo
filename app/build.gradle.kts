@@ -72,6 +72,9 @@ dependencies {
     // Material (XML 主题需要)
     implementation(libs.material)
 
+    // ZXing — QR 码生成
+    implementation(libs.zxing.core)
+
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
