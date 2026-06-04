@@ -1,5 +1,6 @@
 package com.lemon.echo.ui
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -78,6 +79,7 @@ fun ScannerScreen() {
 
     // Camera state
     var camera by remember { mutableStateOf<Camera?>(null) }
+    var previewView by remember { mutableStateOf<PreviewView?>(null) }
 
     // Camera provider
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
@@ -91,6 +93,11 @@ fun ScannerScreen() {
 
         val preview = Preview.Builder()
             .build()
+            .also {
+                previewView?.let { view ->
+                    it.setSurfaceProvider(view.surfaceProvider)
+                }
+            }
 
         val cameraSelector = CameraSelector.Builder()
             .requireLensFacing(CameraSelector.LENS_FACING_BACK)
@@ -154,10 +161,10 @@ fun ScannerScreen() {
 
     // Open URL in browser
     fun openUrl(url: String) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        if (intent.resolveActivity(context.packageManager) != null) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
             context.startActivity(intent)
-        } else {
+        } catch (e: ActivityNotFoundException) {
             Toast.makeText(context, "没有可用的浏览器", Toast.LENGTH_SHORT).show()
         }
     }
@@ -166,9 +173,10 @@ fun ScannerScreen() {
         // Camera preview
         AndroidView(
             factory = { ctx ->
-                PreviewView(ctx).apply {
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
-                    implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                PreviewView(ctx).also { view ->
+                    view.scaleType = PreviewView.ScaleType.FILL_CENTER
+                    view.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                    previewView = view
                 }
             },
             modifier = Modifier.fillMaxSize()
