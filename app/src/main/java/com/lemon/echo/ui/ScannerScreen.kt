@@ -46,6 +46,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -120,6 +121,9 @@ fun ScannerScreen() {
     var camera by remember { mutableStateOf<Camera?>(null) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
 
+    // Auto-copy: local Compose state synced with SharedPreferences
+    var autoCopyEnabled by remember { mutableStateOf(historyManager.autoCopyEnabled) }
+
     // Focus indicator state (pixel coords from touch event)
     var focusEvent by remember { mutableStateOf(0L) }   // incremented on each tap for focus
     var focusX by remember { mutableStateOf(0f) }
@@ -154,7 +158,7 @@ fun ScannerScreen() {
                 showResult = true
                 historyManager.addToHistory(result)
                 triggerFeedback(context)
-                if (historyManager.autoCopyEnabled) {
+                if (autoCopyEnabled) {
                     copyToClipboard(context, result.rawText, showToast = false)
                 }
             }
@@ -243,7 +247,8 @@ fun ScannerScreen() {
             onClick = { toggleTorch() },
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 16.dp, end = 16.dp)
+                .statusBarsPadding()
+                .padding(top = 12.dp, end = 16.dp)
                 .size(48.dp)
                 .clip(CircleShape)
                 .background(Color.Black.copy(alpha = 0.4f)),
@@ -262,7 +267,8 @@ fun ScannerScreen() {
             onClick = { showHistory = true },
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(top = 16.dp, start = 16.dp)
+                .statusBarsPadding()
+                .padding(top = 12.dp, start = 16.dp)
                 .size(48.dp)
                 .clip(CircleShape)
                 .background(Color.Black.copy(alpha = 0.4f)),
@@ -298,8 +304,11 @@ fun ScannerScreen() {
         ) {
             ResultContent(
                 result = result,
-                autoCopyEnabled = historyManager.autoCopyEnabled,
-                onToggleAutoCopy = { historyManager.autoCopyEnabled = it },
+                autoCopyEnabled = autoCopyEnabled,
+                onToggleAutoCopy = { enabled ->
+                    autoCopyEnabled = enabled
+                    historyManager.autoCopyEnabled = enabled
+                },
                 onCopy = { copyToClipboard(context, result.rawText) },
                 onShare = { shareText(context, result.rawText) },
                 onOpenUrl = { openUrl(context, result.rawText) },
