@@ -373,7 +373,7 @@ private fun triggerFeedback(context: Context, playSound: Boolean, playVibration:
                 context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
             }
             vibrator?.let { v ->
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     val attrs = VibrationAttributes.Builder()
                         .setUsage(VibrationAttributes.USAGE_COMMUNICATION_REQUEST)
                         .build()
@@ -381,11 +381,10 @@ private fun triggerFeedback(context: Context, playSound: Boolean, playVibration:
                         VibrationEffect.createOneShot(120, VibrationEffect.DEFAULT_AMPLITUDE),
                         attrs
                     )
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    v.vibrate(VibrationEffect.createOneShot(120, 128))
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    v.vibrate(VibrationEffect.createOneShot(120, VibrationEffect.DEFAULT_AMPLITUDE))
                 } else {
-                    @Suppress("DEPRECATION")
-                    v.vibrate(120)
+                    v.vibrate(VibrationEffect.createOneShot(120, 128))
                 }
             }
         } catch (_: Exception) {

@@ -29,6 +29,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -75,9 +77,9 @@ fun CameraPreview(
     val currentOnBarcodeDetected by rememberUpdatedState(onBarcodeDetected)
 
     // Focus indicator state
-    var focusEvent by remember { mutableStateOf(0L) }
-    var focusX by remember { mutableStateOf(0f) }
-    var focusY by remember { mutableStateOf(0f) }
+    var focusEvent by remember { mutableLongStateOf(0L) }
+    var focusX by remember { mutableFloatStateOf(0f) }
+    var focusY by remember { mutableFloatStateOf(0f) }
 
     // --- Camera setup ---
     DisposableEffect(lifecycleOwner, isScanning) {
@@ -153,6 +155,7 @@ fun CameraPreview(
                             focusX = event.x
                             focusY = event.y
                             focusEvent = System.currentTimeMillis()
+                            view.performClick()
                             true
                         } else false
                     }
