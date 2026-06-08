@@ -15,7 +15,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,11 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -74,6 +69,7 @@ fun CameraPreview(
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
 
     // Remember updated state for DisposableEffect lambda capture
+    val currentIsScanning by rememberUpdatedState(isScanning)
     val currentOnBarcodeDetected by rememberUpdatedState(onBarcodeDetected)
 
     // Focus indicator state
@@ -81,8 +77,8 @@ fun CameraPreview(
     var focusX by remember { mutableFloatStateOf(0f) }
     var focusY by remember { mutableFloatStateOf(0f) }
 
-    // --- Camera setup ---
-    DisposableEffect(lifecycleOwner, isScanning) {
+    // --- Camera setup (binds once, never unbinds on isScanning toggle) ---
+    DisposableEffect(lifecycleOwner) {
         if (!isScanning) return@DisposableEffect onDispose {}
 
         val cameraProvider = cameraProviderFuture.get()
@@ -100,7 +96,7 @@ fun CameraPreview(
             .build()
 
         val analyzer = BarcodeAnalyzer { result ->
-            if (isScanning) {
+            if (currentIsScanning) {
                 currentOnBarcodeDetected(result)
             }
         }
@@ -173,41 +169,6 @@ fun CameraPreview(
             x = focusX,
             y = focusY
         )
-    }
-}
-
-// ====== Corner Brackets (reusable) ======
-
-/** Draws four L-shaped corner brackets using a Canvas. */
-@Composable
-internal fun CornerBrackets(
-    modifier: Modifier = Modifier,
-    cornerLength: Dp,
-    strokeWidth: Dp,
-    color: Color
-) {
-    Canvas(modifier = modifier) {
-        val cLen = cornerLength.toPx()
-        val sw = strokeWidth.toPx()
-        val path = Path().apply {
-            // Top-left
-            moveTo(0f, cLen)
-            lineTo(0f, 0f)
-            lineTo(cLen, 0f)
-            // Top-right
-            moveTo(size.width - cLen, 0f)
-            lineTo(size.width, 0f)
-            lineTo(size.width, cLen)
-            // Bottom-right
-            moveTo(size.width, size.height - cLen)
-            lineTo(size.width, size.height)
-            lineTo(size.width - cLen, size.height)
-            // Bottom-left
-            moveTo(cLen, size.height)
-            lineTo(0f, size.height)
-            lineTo(0f, size.height - cLen)
-        }
-        drawPath(path, color = color, style = Stroke(width = sw, cap = StrokeCap.Round))
     }
 }
 

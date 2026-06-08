@@ -9,16 +9,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
-import android.media.AudioManager
-import android.media.ToneGenerator
 import android.net.Uri
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.VibrationAttributes
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import android.provider.Settings
 import android.view.WindowManager
 import android.widget.Toast
@@ -60,7 +53,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -82,6 +74,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -93,9 +86,11 @@ import com.google.mlkit.vision.common.InputImage
 import com.lemon.echo.scanner.ScanHistoryItem
 import com.lemon.echo.scanner.ScanHistoryManager
 import com.lemon.echo.scanner.ScanResult
+import com.lemon.echo.scanner.playFeedback
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.core.net.toUri
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -163,23 +158,23 @@ fun ScannerScreen(
             val inputStream = context.contentResolver.openInputStream(uri)
             val bitmap = BitmapFactory.decodeStream(inputStream)
             inputStream?.close()
-            if (bitmap != null) {
-                scanBitmapForResult(context, bitmap) { result ->
-                    galleryProcessing = false
-                    if (result != null) {
-                        isScanning = false
-                        detectedResult = result
-                        showResult = true
-                        historyManager.addToHistory(result)
-                        triggerFeedback(context, currentSoundEnabled, currentVibrationEnabled)
-                        if (currentAutoCopyEnabled) {
-                            copyToClipboard(context, result.rawText, showToast = false)
-                        }
-                    }
-                }
-            } else {
+            if (bitmap == null) {
                 galleryProcessing = false
                 Toast.makeText(context, "无法读取图片", Toast.LENGTH_SHORT).show()
+                return@rememberLauncherForActivityResult
+            }
+            scanBitmapForResult(context, bitmap) { result ->
+                galleryProcessing = false
+                if (result != null) {
+                    isScanning = false
+                    detectedResult = result
+                    showResult = true
+                    historyManager.addToHistory(result)
+                    playFeedback(context, sound = currentSoundEnabled, vibration = currentVibrationEnabled)
+                    if (currentAutoCopyEnabled) {
+                        copyToClipboard(context, result.rawText, showToast = false)
+                    }
+                }
             }
         } catch (e: Exception) {
             galleryProcessing = false
@@ -206,7 +201,7 @@ fun ScannerScreen(
                     detectedResult = result
                     showResult = true
                     historyManager.addToHistory(result)
-                    triggerFeedback(context, currentSoundEnabled, currentVibrationEnabled)
+                    playFeedback(context, sound = currentSoundEnabled, vibration = currentVibrationEnabled)
                     if (currentAutoCopyEnabled) {
                         copyToClipboard(context, result.rawText, showToast = false)
                     }
@@ -302,8 +297,7 @@ fun ScannerScreen(
                 onClear = {
                     historyManager.clearHistory()
                     showHistory = false
-                },
-                onDismiss = { showHistory = false }
+                }
             )
         }
     }
@@ -351,6 +345,30 @@ fun ScannerScreen(
 }
 // ====== Toolbar ======
 
+// ====== Toolbar Icon Button (reusable) ======
+
+@Composable
+private fun ToolbarIconButton(
+    onClick: () -> Unit,
+    icon: ImageVector,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    tint: Color = Color.White
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.4f)),
+        colors = IconButtonDefaults.iconButtonColors(contentColor = tint)
+    ) {
+        Icon(imageVector = icon, contentDescription = contentDescription)
+    }
+}
+
+// ====== Scanner Toolbar ======
+
 @Composable
 private fun ScannerToolbar(
     isTorchOn: Boolean,
@@ -361,22 +379,15 @@ private fun ScannerToolbar(
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         // History button (top-left)
-        IconButton(
+        ToolbarIconButton(
             onClick = onOpenHistory,
+            icon = Icons.Default.History,
+            contentDescription = "扫描历史",
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
                 .padding(top = 12.dp, start = 16.dp)
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.4f)),
-            colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)
-        ) {
-            Icon(
-                imageVector = Icons.Default.History,
-                contentDescription = "扫描历史"
-            )
-        }
+        )
 
         // Torch + settings (top-right)
         Column(
@@ -387,36 +398,19 @@ private fun ScannerToolbar(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (showTorch) {
-                IconButton(
+                ToolbarIconButton(
                     onClick = onToggleTorch,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.4f)),
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = if (isTorchOn) Color(0xFFFFD700) else Color.White
-                    )
-                ) {
-                    Icon(
-                        imageVector = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
-                        contentDescription = if (isTorchOn) "关闭手电筒" else "打开手电筒"
-                    )
-                }
-            }
-
-            IconButton(
-                onClick = onOpenSettings,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.4f)),
-                colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "设置"
+                    icon = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                    contentDescription = if (isTorchOn) "关闭手电筒" else "打开手电筒",
+                    tint = if (isTorchOn) Color(0xFFFFD700) else Color.White
                 )
             }
+
+            ToolbarIconButton(
+                onClick = onOpenSettings,
+                icon = Icons.Default.Settings,
+                contentDescription = "设置"
+            )
         }
     }
 }
@@ -461,62 +455,6 @@ private fun PermissionRequestContent(onRequestPermission: () -> Unit) {
     }
 }
 
-private fun triggerFeedback(context: Context, playSound: Boolean, playVibration: Boolean) {
-    // Ensure on main thread for vibration
-    if (Looper.myLooper() != Looper.getMainLooper()) {
-        Handler(Looper.getMainLooper()).post { triggerFeedback(context, playSound, playVibration) }
-        return
-    }
-
-    // === Vibration ===
-    if (playVibration) {
-        try {
-            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                vm?.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION")
-                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            }
-            vibrator?.let { v ->
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    val attrs = VibrationAttributes.Builder()
-                        .setUsage(VibrationAttributes.USAGE_COMMUNICATION_REQUEST)
-                        .build()
-                    v.vibrate(
-                        VibrationEffect.createOneShot(120, VibrationEffect.DEFAULT_AMPLITUDE),
-                        attrs
-                    )
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    v.vibrate(VibrationEffect.createOneShot(120, VibrationEffect.DEFAULT_AMPLITUDE))
-                } else {
-                    v.vibrate(VibrationEffect.createOneShot(120, 128))
-                }
-            }
-        } catch (_: Exception) {
-            try {
-                @Suppress("DEPRECATION")
-                (context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)?.vibrate(
-                    longArrayOf(0, 120), -1
-                )
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    // === Sound ===
-    if (playSound) {
-        Thread {
-            try {
-                val generator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
-                generator.startTone(ToneGenerator.TONE_PROP_ACK, 200)
-                Thread.sleep(300)
-                generator.release()
-            } catch (_: Exception) {
-            }
-        }.start()
-    }
-}
 // ====== Clipboard ======
 
 private fun copyToClipboard(context: Context, text: String, showToast: Boolean = true) {
@@ -541,7 +479,7 @@ private fun shareText(context: Context, text: String) {
 
 private fun openUrl(context: Context, url: String) {
     try {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        val intent = Intent(Intent.ACTION_VIEW, url.toUri())
         context.startActivity(intent)
     } catch (e: ActivityNotFoundException) {
         Toast.makeText(context, "没有可用的浏览器", Toast.LENGTH_SHORT).show()
@@ -698,8 +636,7 @@ private fun ResultContent(
 @Composable
 private fun HistoryContent(
     history: List<ScanHistoryItem>,
-    onClear: () -> Unit,
-    onDismiss: () -> Unit
+    onClear: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -745,21 +682,21 @@ private fun HistoryContent(
                     .padding(vertical = 32.dp),
                 textAlign = TextAlign.Center
             )
-        } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 8.dp)
-            ) {
-                items(history) { item ->
-                    HistoryItem(item = item, onClick = { onDismiss() })
-                }
+            return
+        }
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 8.dp)
+        ) {
+            items(history) { item ->
+                HistoryItem(item = item)
             }
         }
     }
 }
 
 @Composable
-private fun HistoryItem(item: ScanHistoryItem, onClick: () -> Unit) {
+private fun HistoryItem(item: ScanHistoryItem) {
     val timeFormat = remember {
         SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     }
