@@ -24,6 +24,7 @@ import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -35,13 +36,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FlashOff
@@ -593,20 +597,24 @@ private fun ResultContent(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Raw text
-        Text(
-            text = result.rawText,
-            style = MaterialTheme.typography.bodyLarge.copy(
-                fontSize = 16.sp,
-                lineHeight = 24.sp
-            ),
-            textAlign = TextAlign.Start,
+        // Raw text — scrollable with max height, buttons stay visible
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .heightIn(max = 250.dp)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp)
-        )
+        ) {
+            Text(
+                text = result.rawText,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 16.sp,
+                    lineHeight = 24.sp
+                ),
+                textAlign = TextAlign.Start,
+            )
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -623,25 +631,6 @@ private fun ResultContent(
             )
             Spacer(modifier = Modifier.size(8.dp))
             Text("复制文本")
-        }
-
-        // Share button
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = onShare,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.tertiary
-            )
-        ) {
-            Icon(
-                imageVector = Icons.Default.Share,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.size(8.dp))
-            Text("分享")
         }
 
         // Open in browser (only if URL)
@@ -665,19 +654,41 @@ private fun ResultContent(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // Scan again
-        Button(
-            onClick = onScanAgain,
+        // Share + Scan again on the same row
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
-                contentColor = MaterialTheme.colorScheme.onSurface
-            )
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("继续扫描")
+            Button(
+                onClick = onShare,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.tertiary
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Share,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text("分享")
+            }
+
+            Button(
+                onClick = onScanAgain,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                )
+            ) {
+                Text("继续扫描")
+            }
         }
     }
 }
