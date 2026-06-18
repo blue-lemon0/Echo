@@ -90,7 +90,14 @@ import com.lemon.echo.scanner.playFeedback
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.text.font.FontWeight
 import androidx.core.net.toUri
+import com.lemon.echo.scanner.chain.ScanMode
+import com.lemon.echo.scanner.chain.ScanSession
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -114,6 +121,13 @@ fun ScannerScreen(
     var isTorchOn by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+
+    // Continuous scan mode state
+    var scanMode by remember { mutableStateOf(ScanMode.SINGLE) }
+    val session = remember { ScanSession() }
+    val sessionState by session.state.collectAsState()
+    var sessionResult by remember { mutableStateOf<String?>(null) }
+    var showSessionResult by remember { mutableStateOf(false) }
 
     // Permission state
     var hasPermission by remember {
@@ -144,6 +158,34 @@ fun ScannerScreen(
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose {
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    // React to session state changes (continuous mode)
+    LaunchedEffect(sessionState) {
+        when (val s = sessionState) {
+            is ScanSession.State.Done -> {
+                playFeedback(context, sound = currentSoundEnabled, vibration = currentVibrationEnabled)
+                if (currentAutoCopyEnabled) {
+                    copyToClipboard(context, s.text, showToast = false)
+                }
+                sessionResult = s.text
+                showSessionResult = true
+            }
+            is ScanSession.State.SoloScanned -> {
+                playFeedback(context, sound = currentSoundEnabled, vibration = currentVibrationEnabled)
+            }
+            is ScanSession.State.Rejected -> {
+                Toast.makeText(context, s.reason, Toast.LENGTH_SHORT).show()
+            }
+            is ScanSession.State.Stopped -> {
+                val text = s.segments.joinToString("") { it.second }
+                if (text.isNotBlank()) {
+                    sessionResult = text
+                    showSessionResult = true
+                }
+            }
+            else -> {}
         }
     }
 
@@ -191,22 +233,32 @@ fun ScannerScreen(
     // --- UI ---
     Box(modifier = Modifier.fillMaxSize()) {
         if (hasPermission) {
-            // Camera preview (CameraX + scan overlay + focus indicator)
-            CameraPreview(
-                modifier = Modifier.fillMaxSize(),
-                isScanning = isScanning && !showResult,
-                isTorchOn = isTorchOn,
-                onBarcodeDetected = { result ->
-                    isScanning = false
-                    detectedResult = result
-                    showResult = true
-                    historyManager.addToHistory(result)
-                    playFeedback(context, sound = currentSoundEnabled, vibration = currentVibrationEnabled)
-                    if (currentAutoCopyEnabled) {
-                        copyToClipboard(context, result.rawText, showToast = false)
+            if (scanMode == ScanMode.SINGLE) {
+                CameraPreview(
+                    modifier = Modifier.fillMaxSize(),
+                    isScanning = isScanning && !showResult,
+                    isTorchOn = isTorchOn,
+                    onBarcodeDetected = { result ->
+                        isScanning = false
+                        detectedResult = result
+                        showResult = true
+                        historyManager.addToHistory(result)
+                        playFeedback(context, sound = currentSoundEnabled, vibration = currentVibrationEnabled)
+                        if (currentAutoCopyEnabled) {
+                            copyToClipboard(context, result.rawText, showToast = false)
+                        }
                     }
-                }
-            )
+                )
+            } else {
+                CameraPreview(
+                    modifier = Modifier.fillMaxSize(),
+                    isScanning = true,
+                    isTorchOn = isTorchOn,
+                    onBarcodeDetected = { result ->
+                        session.accept(result.rawText)
+                    }
+                )
+            }
         } else {
             // Permission request view
             PermissionRequestContent(
@@ -223,7 +275,7 @@ fun ScannerScreen(
             showTorch = hasPermission
         )
 
-        // Bottom controls: gallery button + hint (only when camera is active)
+        // Bottom controls: gallery button + mode switch + hint (only when camera is active)
         if (hasPermission) {
             Column(
                 modifier = Modifier
@@ -231,6 +283,45 @@ fun ScannerScreen(
                     .padding(bottom = 48.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Mode switcher: SINGLE / CONTINUOUS
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FilterChip(
+                        selected = scanMode == ScanMode.SINGLE,
+                        onClick = {
+                            scanMode = ScanMode.SINGLE
+                            session.reset()
+                        },
+                        label = { Text("单次", fontSize = 12.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF4FC3F7),
+                            selectedLabelColor = Color.White,
+                            containerColor = Color.Black.copy(alpha = 0.35f),
+                            labelColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    FilterChip(
+                        selected = scanMode == ScanMode.CONTINUOUS,
+                        onClick = {
+                            scanMode = ScanMode.CONTINUOUS
+                            session.start()
+                        },
+                        label = { Text("连续", fontSize = 12.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF4FC3F7),
+                            selectedLabelColor = Color.White,
+                            containerColor = Color.Black.copy(alpha = 0.35f),
+                            labelColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.size(12.dp))
+
                 Box(
                     modifier = Modifier
                         .size(44.dp)
@@ -253,10 +344,71 @@ fun ScannerScreen(
                 Spacer(modifier = Modifier.size(10.dp))
 
                 Text(
-                    text = if (galleryProcessing) "识别中…" else "将二维码对准框内",
+                    text = when {
+                        galleryProcessing -> "识别中…"
+                        scanMode == ScanMode.CONTINUOUS -> "连续扫码中，依次扫描各二维码"
+                        else -> "将二维码对准框内"
+                    },
                     color = Color.White.copy(alpha = 0.8f),
                     fontSize = 14.sp,
                 )
+            }
+        }
+
+        // Continuous mode: progress overlay + stop button
+        if (scanMode == ScanMode.CONTINUOUS && hasPermission) {
+            when (val s = sessionState) {
+                is ScanSession.State.Collecting -> {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .statusBarsPadding()
+                            .padding(top = 80.dp)
+                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(24.dp))
+                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            text = "连续扫码  ${s.got}/${s.total}",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 160.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color(0xFFE53935))
+                            .clickable { session.stop() }
+                            .padding(horizontal = 24.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            text = "停止",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+                is ScanSession.State.Scanning -> {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .statusBarsPadding()
+                            .padding(top = 80.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
+                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            text = "等待扫码…",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+                else -> {}
             }
         }
     }
@@ -280,6 +432,41 @@ fun ScannerScreen(
                 onShare = { shareText(context, result.rawText) },
                 onOpenUrl = { openUrl(context, result.rawText) },
                 onScanAgain = { scanAgain() }
+            )
+        }
+    }
+
+    // Session result bottom sheet (continuous mode)
+    if (showSessionResult && sessionResult != null) {
+        val text = sessionResult!!
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = {
+                showSessionResult = false
+                sessionResult = null
+                if (scanMode == ScanMode.CONTINUOUS) session.start()
+            },
+            sheetState = sheetState,
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            SessionResultContent(
+                text = text,
+                autoCopyEnabled = autoCopyEnabled,
+                onCopy = { copyToClipboard(context, text) },
+                onShare = { shareText(context, text) },
+                onContinue = {
+                    showSessionResult = false
+                    sessionResult = null
+                    session.start()
+                },
+                onStop = {
+                    showSessionResult = false
+                    sessionResult = null
+                    session.reset()
+                    scanMode = ScanMode.SINGLE
+                    isScanning = true
+                }
             )
         }
     }
@@ -627,6 +814,127 @@ private fun ResultContent(
             ) {
                 Text("继续扫描")
             }
+        }
+    }
+}
+
+// ====== Session Result Content (continuous mode) ======
+
+@Composable
+private fun SessionResultContent(
+    text: String,
+    autoCopyEnabled: Boolean,
+    onCopy: () -> Unit,
+    onShare: () -> Unit,
+    onContinue: () -> Unit,
+    onStop: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp)
+            .padding(bottom = 32.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(
+                imageVector = Icons.Default.QrCodeScanner,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.size(8.dp))
+            Text(
+                text = "连续扫码结果",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 250.dp)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 16.sp,
+                    lineHeight = 24.sp
+                ),
+                textAlign = TextAlign.Start,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Button(
+            onClick = onCopy,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.ContentCopy,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.size(8.dp))
+            Text("复制文本")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onShare,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.tertiary
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Share,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text("分享")
+            }
+
+            Button(
+                onClick = onContinue,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                )
+            ) {
+                Text("继续扫码")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        TextButton(
+            onClick = onStop,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = "退出连续扫码",
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 13.sp
+            )
         }
     }
 }
