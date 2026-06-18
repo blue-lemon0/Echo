@@ -29,7 +29,7 @@ class ScanSession {
         if (packet != null) {
             when (val step = resolver.accept(packet)) {
                 is ChainResolver.Step.Collecting -> {
-                    _state.value = State.Collecting(step.got, step.total)
+                    _state.value = State.Collecting(step.got, step.total, step.collected)
                 }
                 is ChainResolver.Step.Assembled -> {
                     _state.value = State.Done(step.text)
@@ -59,7 +59,7 @@ class ScanSession {
     sealed class State {
         data object Idle : State()
         data object Scanning : State()
-        data class Collecting(val got: Int, val total: Int) : State()
+        data class Collecting(val got: Int, val total: Int, val collected: Set<Int>) : State()
         data class SoloScanned(val text: String) : State()
         data class Done(val text: String) : State()
         data class Stopped(val segments: List<Pair<Int, String>>) : State()

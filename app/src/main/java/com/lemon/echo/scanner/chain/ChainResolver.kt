@@ -26,7 +26,7 @@ class ChainResolver {
             return Step.Assembled(full)
         }
 
-        return Step.Collecting(segments.size, expectedTotal!!)
+        return Step.Collecting(segments.size, expectedTotal!!, segments.keys.toSet())
     }
 
     /** Peek at collected segments without resetting. */
@@ -40,7 +40,7 @@ class ChainResolver {
     }
 
     sealed class Step {
-        data class Collecting(val got: Int, val total: Int) : Step()
+        data class Collecting(val got: Int, val total: Int, val collected: Set<Int>) : Step()
         data class Assembled(val text: String) : Step()
         data class Rejected(val reason: String) : Step()
     }

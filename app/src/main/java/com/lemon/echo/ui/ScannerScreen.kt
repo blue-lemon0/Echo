@@ -38,8 +38,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
@@ -355,56 +357,149 @@ fun ScannerScreen(
             }
         }
 
-        // Continuous mode: progress overlay + stop button
+        // Continuous mode: progress card (top center, integrated stop button)
         if (scanMode == ScanMode.CONTINUOUS && hasPermission) {
             when (val s = sessionState) {
                 is ScanSession.State.Collecting -> {
-                    Box(
+                    Column(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .statusBarsPadding()
-                            .padding(top = 80.dp)
-                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(24.dp))
-                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                            .padding(top = 132.dp, start = 48.dp, end = 48.dp)
+                            .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(16.dp))
+                            .padding(12.dp)
                     ) {
-                        Text(
-                            text = "连续扫码  ${s.got}/${s.total}",
-                            color = Color.White,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "连续扫码",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "${s.got}/${s.total}",
+                                color = Color(0xFF4FC3F7),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.size(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.15f))
+                                    .clickable { session.stop() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "停止连续扫码",
+                                    tint = Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
 
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 160.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Color(0xFFE53935))
-                            .clickable { session.stop() }
-                            .padding(horizontal = 24.dp, vertical = 10.dp)
-                    ) {
-                        Text(
-                            text = "停止",
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Spacer(modifier = Modifier.size(10.dp))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            for (i in 0 until s.total) {
+                                val done = i in s.collected
+                                Box(
+                                    modifier = Modifier
+                                        .size(26.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (done) Color(0xFF4CAF50)
+                                            else Color.White.copy(alpha = 0.15f)
+                                        )
+                                        .border(
+                                            width = 1.5.dp,
+                                            color = if (done) Color(0xFF4CAF50)
+                                            else Color.White.copy(alpha = 0.35f),
+                                            shape = CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "${i + 1}",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (done) Color.White
+                                        else Color.White.copy(alpha = 0.5f)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.size(6.dp))
+
+                        val missing = (0 until s.total).filter { it !in s.collected }
+                        if (missing.isNotEmpty()) {
+                            Text(
+                                text = "待扫: ${formatRanges(missing)}",
+                                color = Color(0xFFFFCC80),
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
                 is ScanSession.State.Scanning -> {
-                    Box(
+                    Column(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .statusBarsPadding()
-                            .padding(top = 80.dp)
-                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
-                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                            .padding(top = 132.dp, start = 48.dp, end = 48.dp)
+                            .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(16.dp))
+                            .padding(12.dp)
                     ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "连续扫码",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.15f))
+                                    .clickable {
+                                        session.reset()
+                                        scanMode = ScanMode.SINGLE
+                                        isScanning = true
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "退出连续扫码",
+                                    tint = Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.size(6.dp))
                         Text(
-                            text = "等待扫码…",
-                            color = Color.White.copy(alpha = 0.8f),
-                            fontSize = 14.sp
+                            text = "等待首张二维码…",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 12.sp
                         )
                     }
                 }
@@ -1046,7 +1141,25 @@ private fun HistoryItem(item: ScanHistoryItem) {
                     // Copy handled via the onCopy callback
                 }
         )
+        }
+}
+
+/** Compress a sorted list of 0‑based indices to compact 1‑based ranges: [0,1,4] → "1-2, 5" */
+private fun formatRanges(indices: List<Int>): String {
+    if (indices.isEmpty()) return ""
+    val parts = mutableListOf<String>()
+    var i = 0
+    while (i < indices.size) {
+        val start = indices[i]
+        var end = start
+        while (i + 1 < indices.size && indices[i + 1] == end + 1) {
+            end = indices[i + 1]
+            i++
+        }
+        parts.add(if (start == end) "${start + 1}" else "${start + 1}-${end + 1}")
+        i++
     }
+    return parts.joinToString(", ")
 }
 
 /** Scan a Bitmap using ML Kit barcode scanner and invoke [onResult] when done.
