@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Settings
@@ -85,6 +86,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
+import com.lemon.echo.scanner.HistoryLabel
 import com.lemon.echo.scanner.ScanHistoryItem
 import com.lemon.echo.scanner.ScanHistoryManager
 import com.lemon.echo.scanner.ScanResult
@@ -105,6 +107,7 @@ import com.lemon.echo.scanner.chain.ScanSession
 @Composable
 fun ScannerScreen(
     modifier: Modifier = Modifier,
+    session: ScanSession,
     historyManager: ScanHistoryManager,
     soundEnabled: Boolean = true,
     vibrationEnabled: Boolean = true,
@@ -123,10 +126,10 @@ fun ScannerScreen(
     var isTorchOn by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var viewingHistoryItem by remember { mutableStateOf<ScanHistoryItem?>(null) }
 
     // Continuous scan mode state
     var scanMode by remember { mutableStateOf(ScanMode.SINGLE) }
-    val session = remember { ScanSession() }
     val sessionState by session.state.collectAsState()
     var sessionResult by remember { mutableStateOf<String?>(null) }
     var showSessionResult by remember { mutableStateOf(false) }
@@ -164,6 +167,7 @@ fun ScannerScreen(
     }
 
     // React to session state changes (continuous mode)
+    val currentHistoryManager by rememberUpdatedState(historyManager)
     LaunchedEffect(sessionState) {
         when (val s = sessionState) {
             is ScanSession.State.Done -> {
@@ -171,6 +175,7 @@ fun ScannerScreen(
                 if (currentAutoCopyEnabled) {
                     copyToClipboard(context, s.text, showToast = false)
                 }
+                currentHistoryManager.addToHistory(s.text, HistoryLabel.CHAIN)
                 sessionResult = s.text
                 showSessionResult = true
             }
@@ -183,6 +188,7 @@ fun ScannerScreen(
             is ScanSession.State.Stopped -> {
                 val text = s.segments.joinToString("") { it.second }
                 if (text.isNotBlank()) {
+                    currentHistoryManager.addToHistory(text, HistoryLabel.CHAIN)
                     sessionResult = text
                     showSessionResult = true
                 }
@@ -286,6 +292,12 @@ fun ScannerScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Mode switcher: SINGLE / CONTINUOUS
+                val chipColors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Color(0xFF4FC3F7),
+                    selectedLabelColor = Color.White,
+                    containerColor = Color.Black.copy(alpha = 0.35f),
+                    labelColor = Color.White
+                )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -297,12 +309,7 @@ fun ScannerScreen(
                             session.reset()
                         },
                         label = { Text("单次", fontSize = 12.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFF4FC3F7),
-                            selectedLabelColor = Color.White,
-                            containerColor = Color.Black.copy(alpha = 0.35f),
-                            labelColor = Color.White
-                        ),
+                        colors = chipColors,
                         shape = RoundedCornerShape(16.dp)
                     )
                     FilterChip(
@@ -312,12 +319,7 @@ fun ScannerScreen(
                             session.start()
                         },
                         label = { Text("连续", fontSize = 12.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFF4FC3F7),
-                            selectedLabelColor = Color.White,
-                            containerColor = Color.Black.copy(alpha = 0.35f),
-                            labelColor = Color.White
-                        ),
+                        colors = chipColors,
                         shape = RoundedCornerShape(16.dp)
                     )
                 }
@@ -568,6 +570,7 @@ fun ScannerScreen(
 
     // History bottom sheet
     if (showHistory) {
+        val historyList by historyManager.historyFlow.collectAsState()
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             onDismissRequest = { showHistory = false },
@@ -575,11 +578,38 @@ fun ScannerScreen(
             shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
         ) {
             HistoryContent(
-                history = historyManager.history,
+                history = historyList,
                 onClear = {
                     historyManager.clearHistory()
                     showHistory = false
+                },
+                onItemClick = { item ->
+                    showHistory = false
+                    viewingHistoryItem = item
+                },
+                onItemCopy = { item ->
+                    copyToClipboard(context, item.text)
                 }
+            )
+        }
+    }
+
+    // History item detail bottom sheet
+    viewingHistoryItem?.let { item ->
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { viewingHistoryItem = null },
+            sheetState = sheetState,
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            HistoryItemDetailContent(
+                text = item.text,
+                label = item.label,
+                onCopy = { copyToClipboard(context, item.text) },
+                onShare = { shareText(context, item.text) },
+                onOpenUrl = { openUrl(context, item.text) },
+                onDismiss = { viewingHistoryItem = null }
             )
         }
     }
@@ -1039,7 +1069,9 @@ private fun SessionResultContent(
 @Composable
 private fun HistoryContent(
     history: List<ScanHistoryItem>,
-    onClear: () -> Unit
+    onClear: () -> Unit,
+    onItemClick: (ScanHistoryItem) -> Unit,
+    onItemCopy: (ScanHistoryItem) -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -1092,14 +1124,18 @@ private fun HistoryContent(
             contentPadding = PaddingValues(bottom = 8.dp)
         ) {
             items(history) { item ->
-                HistoryItem(item = item)
+                HistoryItem(
+                    item = item,
+                    onClick = { onItemClick(item) },
+                    onCopy = { onItemCopy(item) }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun HistoryItem(item: ScanHistoryItem) {
+private fun HistoryItem(item: ScanHistoryItem, onClick: () -> Unit, onCopy: () -> Unit = {}) {
     val timeFormat = remember {
         SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     }
@@ -1110,8 +1146,18 @@ private fun HistoryItem(item: ScanHistoryItem) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable { onClick() }
             .padding(12.dp)
     ) {
+        Icon(
+            imageVector = if (item.label == HistoryLabel.CHAIN)
+                Icons.Default.Link else Icons.Default.QrCodeScanner,
+            contentDescription = item.label.name,
+            tint = if (item.label == HistoryLabel.CHAIN)
+                MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.size(8.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = item.text,
@@ -1137,11 +1183,129 @@ private fun HistoryItem(item: ScanHistoryItem) {
             modifier = Modifier
                 .size(20.dp)
                 .clip(CircleShape)
-                .clickable {
-                    // Copy handled via the onCopy callback
-                }
+                .clickable { onCopy() }
         )
+    }
+}
+
+@Composable
+private fun HistoryItemDetailContent(
+    text: String,
+    label: HistoryLabel,
+    onCopy: () -> Unit,
+    onShare: () -> Unit,
+    onOpenUrl: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp)
+            .padding(bottom = 32.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = if (label == HistoryLabel.CHAIN)
+                    Icons.Default.Link else Icons.Default.QrCodeScanner,
+                contentDescription = null,
+                tint = if (label == HistoryLabel.CHAIN)
+                    MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.size(8.dp))
+            Text(
+                text = if (label == HistoryLabel.CHAIN) "链式扫码结果" else "扫码结果",
+                style = MaterialTheme.typography.titleLarge
+            )
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 300.dp)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 16.sp,
+                    lineHeight = 24.sp
+                ),
+                textAlign = TextAlign.Start,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Button(
+            onClick = onCopy,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.ContentCopy,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.size(8.dp))
+            Text("复制文本")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onShare,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.tertiary
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Share,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text("分享")
+            }
+            if (text.startsWith("http://") || text.startsWith("https://")) {
+                Button(
+                    onClick = onOpenUrl,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.OpenInBrowser,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text("在浏览器中打开")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        TextButton(
+            onClick = onDismiss,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("关闭", fontSize = 13.sp)
+        }
+    }
 }
 
 /** Compress a sorted list of 0‑based indices to compact 1‑based ranges: [0,1,4] → "1-2, 5" */

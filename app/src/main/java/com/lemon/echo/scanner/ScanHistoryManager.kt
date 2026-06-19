@@ -2,12 +2,18 @@ package com.lemon.echo.scanner
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 
+enum class HistoryLabel { SCAN, CHAIN }
+
 data class ScanHistoryItem(
     val text: String,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val label: HistoryLabel = HistoryLabel.SCAN
 )
 
 class ScanHistoryManager(context: Context) {
@@ -17,23 +23,29 @@ class ScanHistoryManager(context: Context) {
 
     private val historyKey = "history"
 
+    private val _history = mutableListOf<ScanHistoryItem>()
+    private val _historyFlow = MutableStateFlow<List<ScanHistoryItem>>(emptyList())
+    val historyFlow: StateFlow<List<ScanHistoryItem>> = _historyFlow.asStateFlow()
+
     init {
         loadHistory()
     }
 
-    private val _history = mutableListOf<ScanHistoryItem>()
-    val history: List<ScanHistoryItem> get() = _history.toList()
-
     fun addToHistory(result: ScanResult) {
-        // Dedup: don't add if same text already exists
-        _history.removeAll { it.text == result.rawText }
-        _history.add(0, ScanHistoryItem(text = result.rawText))
+        addToHistory(result.rawText, HistoryLabel.SCAN)
+    }
+
+    fun addToHistory(text: String, label: HistoryLabel = HistoryLabel.SCAN) {
+        _history.removeAll { it.text == text }
+        _history.add(0, ScanHistoryItem(text = text, label = label))
         saveHistory()
+        _historyFlow.value = _history.toList()
     }
 
     fun clearHistory() {
         _history.clear()
         saveHistory()
+        _historyFlow.value = emptyList()
     }
 
     private fun saveHistory() {
@@ -42,6 +54,7 @@ class ScanHistoryManager(context: Context) {
             arr.put(JSONObject().apply {
                 put("text", item.text)
                 put("timestamp", item.timestamp)
+                put("label", item.label.name)
             })
         }
         prefs.edit().putString(historyKey, arr.toString()).apply()
@@ -56,7 +69,9 @@ class ScanHistoryManager(context: Context) {
                 _history.add(
                     ScanHistoryItem(
                         text = obj.getString("text"),
-                        timestamp = obj.getLong("timestamp")
+                        timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                        label = try { HistoryLabel.valueOf(obj.optString("label", "SCAN")) }
+                        catch (_: Exception) { HistoryLabel.SCAN }
                     )
                 )
             }

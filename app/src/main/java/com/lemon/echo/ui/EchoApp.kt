@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.lemon.echo.scanner.ScanHistoryManager
 import com.lemon.echo.scanner.SettingsManager
+import com.lemon.echo.scanner.chain.ScanSession
 
 private enum class Tab(val label: String) {
     SCAN("扫一扫"),
@@ -30,6 +31,7 @@ fun EchoApp() {
     val context = LocalContext.current
     val historyManager = remember { ScanHistoryManager(context) }
     val settingsManager = remember { SettingsManager(context) }
+    val session = remember { ScanSession() }
 
     var currentTab by remember { mutableStateOf(Tab.SCAN) }
 
@@ -71,6 +73,7 @@ fun EchoApp() {
         when (currentTab) {
             Tab.SCAN -> ScannerScreen(
                 modifier = Modifier.padding(innerPadding),
+                session = session,
                 historyManager = historyManager,
                 soundEnabled = soundEnabled,
                 vibrationEnabled = vibrationEnabled,
